@@ -85,17 +85,12 @@ end
 
 local agRetryEnabled = true
 
-local function agScheduleNext()
-  hs.timer.doAfter(4, function()
-    if agRetryEnabled then
-      local ok, err = pcall(agDetectAndRetry)
-      if not ok then print("agRetry error: " .. tostring(err)) end
-    end
-    agScheduleNext()
-  end)
-end
-
-agScheduleNext()
+local agTimer = hs.timer.doEvery(4, function()
+  if agRetryEnabled then
+    local ok, err = pcall(agDetectAndRetry)
+    if not ok then print("agRetry error: " .. tostring(err)) end
+  end
+end)
 
 -- ─────────────────────────────────────────────────────────────────
 -- 快捷键
