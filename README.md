@@ -19,10 +19,19 @@
 
 ### 技术原理
 
-- 每 4 秒对 Antigravity 窗口底部区域截图
-- 扫描 VS Code 蓝色像素（`#3376CE`，`R<0.25, G>0.35, B>0.7`）
-- 通过蓝色像素重心 X 偏移区分 **Retry**（dx ≈ -3）与 **Accept all**（dx ≈ -36），只点 Retry
-- 支持多显示器 + Retina 显示屏
+**事件驱动**，平时零 CPU 开销：
+
+1. **日志监听**：用 `hs.pathwatcher` 监听 Antigravity 自身的 Language Server 日志
+   `~/Library/Application Support/Antigravity/logs/<最新会话>/ls-main.log`
+2. **关键字命中**即唤醒：
+   - `agent executor error` → "Agent terminated due to error" 弹框
+   - `UNAVAILABLE (code 503)` → 服务器容量不足
+   - `RESOURCE_EXHAUSTED (code 429)` → 配额用完
+3. **短期像素扫描**：命中后立即截取 Antigravity 窗口截图，扫 VS Code 蓝色像素（`#3376CE`，`R<0.25, G>0.35, B>0.7`），失败则每 2 秒重试，最多 60 秒
+4. **按钮区分**：用蓝色像素重心 X 偏移区分 **Retry**（dx ≈ -3）与 **Accept all**（dx ≈ -36），只点 Retry
+5. **防抖**：成功点击后 15 秒内不再重复触发
+6. **AG 重启自愈**：同时监听 `logs/` 根目录，AG 重启生成新会话目录时自动切换监听目标
+7. 支持多显示器 + Retina 显示屏
 
 ### 环境要求
 
@@ -45,12 +54,14 @@
 |--------|------|
 | `Cmd+Shift+\` | 开启 / 暂停自动 Retry |
 | `Cmd+Option+S` | 手动触发一次检测（调试用） |
+| `Cmd+Option+L` | 打印当前监听状态到 Hammerspoon Console（诊断用） |
 | `Cmd+Option+Z` | 采样按钮区域颜色（调试用） |
 
 ### 注意事项
 
-- 脚本使用像素坐标硬编码了按钮相对位置（窗口右边 40px、底部 136px），适用于 Antigravity 1.22.x。如按钮位置变化，修改 `btnX` / `btnY` 的偏移值即可。
-- 若想关闭后台轮询，按 `Cmd+Shift+\` 暂停，或将 `agRetryEnabled` 初始值改为 `false`。
+- 按钮位置使用像素坐标硬编码（窗口右边 40px、底部 136px），适用于 Antigravity 1.22.x。如按钮位置变化，修改 `btnX` / `btnY` 的偏移值即可。
+- 按 `Cmd+Shift+\` 暂停自动 Retry，或将 `agRetryEnabled` 初始值改为 `false`。
+- 如果下次 AG 出现弹框时脚本没反应，先按 `Cmd+Option+L` 看 Console 中的监听文件是否正确；再 `tail` 一下对应 `ls-main.log`，确认错误日志是否带了 `agent executor error` / `code 503` / `code 429` 之一。若出现了新的错误签名，在脚本中 `AG_TRIGGER_PATTERNS` 里补上即可。
 
 ---
 
@@ -69,10 +80,19 @@ This script uses [Hammerspoon](https://www.hammerspoon.org/) to automatically de
 
 ### How It Works
 
-- Takes a screenshot of the Antigravity window's bottom area every 4 seconds
-- Scans for VS Code blue pixels (`#3376CE`, `R<0.25, G>0.35, B>0.7`)
-- Uses the blue pixel centroid X offset to distinguish **Retry** (dx ≈ -3) from **Accept all** (dx ≈ -36) — only clicks Retry
-- Supports multiple monitors and Retina displays
+**Event-driven**, zero CPU when idle:
+
+1. **Log watcher**: uses `hs.pathwatcher` to tail Antigravity's language server log
+   `~/Library/Application Support/Antigravity/logs/<latest session>/ls-main.log`
+2. **Trigger keywords** (any match wakes the retry routine):
+   - `agent executor error` → "Agent terminated due to error" modal
+   - `UNAVAILABLE (code 503)` → server capacity exhausted
+   - `RESOURCE_EXHAUSTED (code 429)` → quota exhausted
+3. **Short-burst pixel scan**: on trigger, immediately snapshot the Antigravity window, scan for VS Code blue pixels (`#3376CE`, `R<0.25, G>0.35, B>0.7`); retry every 2s for up to 60s if not found
+4. **Button disambiguation**: uses the blue pixel centroid X offset to distinguish **Retry** (dx ≈ -3) from **Accept all** (dx ≈ -36), only clicking Retry
+5. **Debounce**: ignore re-triggers within 15s of a successful click
+6. **AG restart self-heal**: also watches `logs/` root; when AG starts a new session directory, the log watcher automatically switches targets
+7. Supports multiple monitors and Retina displays
 
 ### Requirements
 
@@ -95,12 +115,14 @@ This script uses [Hammerspoon](https://www.hammerspoon.org/) to automatically de
 |--------|--------|
 | `Cmd+Shift+\` | Toggle auto Retry on / off |
 | `Cmd+Option+S` | Manually trigger detection once (debug) |
+| `Cmd+Option+L` | Print watcher status to Hammerspoon Console (diagnostic) |
 | `Cmd+Option+Z` | Sample button area colors (debug) |
 
 ### Notes
 
-- The script uses hardcoded pixel offsets relative to the window edge (40px from right, 136px from bottom), calibrated for Antigravity 1.22.x. If the button position changes in a future version, adjust `btnX` / `btnY`.
-- To disable background polling, press `Cmd+Shift+\` or set `agRetryEnabled = false` in the script.
+- The button position uses hardcoded pixel offsets relative to the window edge (40px from right, 136px from bottom), calibrated for Antigravity 1.22.x. Adjust `btnX` / `btnY` if the button moves in future versions.
+- To disable the watcher, press `Cmd+Shift+\` or set `agRetryEnabled = false` in the script.
+- If the script fails to react next time a modal appears, press `Cmd+Option+L` to verify the watched log path, then `tail` the corresponding `ls-main.log` to check whether the error line contains one of `agent executor error` / `code 503` / `code 429`. If Google introduces a new error signature, add it to `AG_TRIGGER_PATTERNS` in the script.
 
 ---
 
